@@ -5,17 +5,14 @@ import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
-
-# Function to fetch daily data
-def fetch_daily_data(ticker, start_date):
-    df = yf.download(ticker, start=start_date, end=datetime.today().strftime('%Y-%m-%d'))
+# Function to fetch data with different intervals
+def fetch_data(ticker, interval, start_date):
+    df = yf.download(ticker, start=start_date, end=datetime.today().strftime('%Y-%m-%d'), interval=interval)
     return df
-
 
 # Function to calculate EMA
 def calculate_ema(df, window):
     return df['Close'].ewm(span=window, adjust=False).mean()
-
 
 # Function to calculate EMA crossover signals
 def ema_crossover_signals(df, short_window=9, long_window=20):
@@ -24,13 +21,13 @@ def ema_crossover_signals(df, short_window=9, long_window=20):
     df['EMA50'] = calculate_ema(df, 50)  # Adding EMA 50 calculation
 
     df['Signal'] = 0
-    df['Signal'][short_window:] = np.where(df['EMA9'][short_window:] > df['EMA20'][short_window:], 1, 0)
+    if len(df) > short_window:
+        df.loc[df.index[short_window:], 'Signal'] = np.where(df['EMA9'][short_window:] > df['EMA20'][short_window:], 1, 0)
     df['Position'] = df['Signal'].diff()
 
     crossover_dates = df[df['Position'] != 0].index
 
     return df, crossover_dates
-
 
 # Function to backtest strategies
 def backtest_strategies(df):
@@ -67,22 +64,29 @@ def backtest_strategies(df):
 
     return buy_hold_return, crossover_return
 
-
 # Streamlit app
 st.title('EMA Crossovers and Backtesting Results')
 
+# Dropdown filter for intervals
+interval = st.selectbox('Select Interval', ['1d', '1h'])
+
+# Determine start date based on selected interval
+if interval == '1d':
+    start_date = datetime.now() - timedelta(days=90)
+elif interval == '1h':
+    start_date = datetime.now() - timedelta(days=30)
+
 # List of tickers
-tickers = ['SPY','QQQ','IWM','META','NVDA', 'AAPL', 'TSLA', 'AMD', 'PLTR', 'GME', 'TSM', 'MU', 'AMZN', 'DELL',
-           'MSFT', 'ARM', 'CHWY', 'META', 'SMCI', 'SIRI', 'HPE', 'QCOM', 'BBY', 'MARA']
-# Define the start date for fetching data as 3 months ago
-start_date = datetime.now() - timedelta(days=90)
+tickers = ['SPY', 'QQQ', 'IWM', 'META', 'NVDA', 'AAPL', 'TSLA', 'AMD', 'PLTR', 'TSM', 'MU', 'AMZN', 'DELL',
+           'MSFT', 'ARM']
 
 # Initialize a list to store tickers with crossovers
 tickers_with_crossovers = []
+recent_crossovers = []
 
 # Check for crossovers for each ticker
 for ticker in tickers:
-    df = fetch_daily_data(ticker, start_date)
+    df = fetch_data(ticker, interval, start_date)
     df, crossover_dates = ema_crossover_signals(df)
     if len(crossover_dates) > 0:
         tickers_with_crossovers.append({
@@ -90,6 +94,28 @@ for ticker in tickers:
             'Crossover Dates': crossover_dates,
             'Data': df
         })
+        # Check for crossovers in the last 5 days
+        recent_crossover_dates = crossover_dates[crossover_dates > (datetime.now() - timedelta(days=5))]
+        if len(recent_crossover_dates) > 0:
+            for date in recent_crossover_dates:
+                crossover_close = df.loc[date, 'Close']
+                current_close = df['Close'].iloc[-1]
+                percent_change = ((current_close - crossover_close) / crossover_close) * 100
+                crossover_type = "Bull" if df.loc[date, 'EMA9'] > df.loc[date, 'EMA20'] else "Bear"
+                recent_crossovers.append({
+                    'Ticker': ticker,
+                    'Date': date.strftime('%Y-%m-%d'),
+                    'Crossover Close': crossover_close,
+                    'Current Price': current_close,
+                    'Percent Change': percent_change,
+                    'Crossover Type': crossover_type
+                })
+
+# Display tickers with recent crossovers in a dataframe
+if len(recent_crossovers) > 0:
+    st.subheader('Recent EMA Crossovers (Last 5 Days)')
+    recent_crossovers_df = pd.DataFrame(recent_crossovers)
+    st.dataframe(recent_crossovers_df)
 
 # Display tickers with crossovers and backtesting results
 if len(tickers_with_crossovers) > 0:
@@ -118,12 +144,12 @@ if len(tickers_with_crossovers) > 0:
 
         # EMA 20 trace
         fig.add_trace(go.Scatter(x=ticker_data['Data'].index, y=ticker_data['Data']['EMA20'],
-                                 mode='lines', line=dict(color='yellow', width=1),
+                                 mode='lines', line=dict(color='orange', width=1),
                                  name='EMA 20'))
 
         # EMA 50 trace
         fig.add_trace(go.Scatter(x=ticker_data['Data'].index, y=ticker_data['Data']['EMA50'],
-                                 mode='lines', line=dict(color='purple', width=1),
+                                 mode='lines', line=dict(color='red', width=1),
                                  name='EMA 50'))
 
         # Add crossover annotations
@@ -132,7 +158,7 @@ if len(tickers_with_crossovers) > 0:
                             text="EMA Crossover", showarrow=True,
                             arrowhead=1, ax=-50, ay=-30) for date in ticker_data['Crossover Dates']]
 
-        fig.update_layout(title=f"{ticker_data['Ticker']} Price with EMA Crossovers (Last 3 Months)",
+        fig.update_layout(title=f"{ticker_data['Ticker']} Price with EMA Crossovers ({interval} Interval)",
                           xaxis_title='Date',
                           yaxis_title='Price',
                           xaxis_rangeslider_visible=False,
@@ -143,5 +169,4 @@ if len(tickers_with_crossovers) > 0:
 
         st.write('---')
 else:
-    st.write('No tickers found with EMA crossovers in the last 3 months.')
-
+    st.write('No tickers found with EMA crossovers in the last selected interval.')
