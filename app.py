@@ -95,7 +95,7 @@ for ticker in tickers:
             'Data': df
         })
         # Check for crossovers in the last 5 days
-        recent_crossover_dates = crossover_dates[crossover_dates > (datetime.now() - timedelta(days=5))]
+        recent_crossover_dates = crossover_dates[crossover_dates > (pd.Timestamp.now(tz=crossover_dates.tz) - timedelta(days=5))]
         if len(recent_crossover_dates) > 0:
             for date in recent_crossover_dates:
                 crossover_close = df.loc[date, 'Close']
